@@ -1,0 +1,170 @@
+bl_info = {
+    "name": "bapp",
+    "author": "徐行 + 书星",
+    "version": (1, 0),
+    "blender": (3, 0, 0),
+    "location": "3D View > Sidebar > Bapp",
+    "description": "Blender App Manager - save/load text blocks to a folder",
+    "category": "3D View",
+}
+
+import bpy
+import os
+
+
+# =========================================================
+# 🧩 主要逻辑函数
+# =========================================================
+
+def get_bapp_dir(scene):
+    """获取当前 Bapp 根目录"""
+    return scene.bapp_root_dir if scene.bapp_root_dir else ""
+
+
+def save_bapp_texts(context):
+    """保存所有带方括号的 Text Block 到 bapp 根目录"""
+    scene = context.scene
+    root = get_bapp_dir(scene)
+    if not root or not os.path.isdir(root):
+        return f"⚠️ Invalid Bapp directory: {root}"
+
+    saved = []
+    for txt in bpy.data.texts:
+        if "[" in txt.name and "]" in txt.name:
+            path = os.path.join(root, txt.name)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(txt.as_string())
+            saved.append(txt.name)
+
+    return f"✅ Saved {len(saved)} text blocks to: {root}" if saved else "⚠️ No [bracketed] texts found."
+
+
+def load_bapp_texts(context):
+    """从 bapp 根目录加载所有文件到 Text Editor"""
+    scene = context.scene
+    root = get_bapp_dir(scene)
+    if not root or not os.path.isdir(root):
+        return f"⚠️ Invalid Bapp directory: {root}"
+
+    loaded = []
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            if name in bpy.data.texts:
+                txt = bpy.data.texts[name]
+                txt.clear()
+            else:
+                txt = bpy.data.texts.new(name)
+            with open(path, "r", encoding="utf-8") as f:
+                txt.from_string(f.read())
+            loaded.append(name)
+
+    return f"✅ Loaded {len(loaded)} text files from: {root}" if loaded else "⚠️ No files found in bapp directory."
+
+
+def run_bapp_install(context):
+    """执行名为 [bapp]install 的 text block"""
+    install_block = bpy.data.texts.get("[bapp]install")
+    if not install_block:
+        return "⚠️ [bapp]install not found."
+    try:
+        exec(install_block.as_string(), {})
+        return "✅ Executed [bapp]install successfully."
+    except Exception as e:
+        return f"❌ Error executing install: {e}"
+
+
+# =========================================================
+# 🧭 Operators
+# =========================================================
+
+class BAPP_OT_Save(bpy.types.Operator):
+    bl_idname = "bapp.save"
+    bl_label = "Save"
+    bl_description = "Save all [bracketed] text blocks to bapp root directory"
+
+    def execute(self, context):
+        msg = save_bapp_texts(context)
+        self.report({'INFO'}, msg)
+        print(msg)
+        return {'FINISHED'}
+
+
+class BAPP_OT_Load(bpy.types.Operator):
+    bl_idname = "bapp.load"
+    bl_label = "Load"
+    bl_description = "Load all files from bapp root directory into Blender text blocks"
+
+    def execute(self, context):
+        msg = load_bapp_texts(context)
+        self.report({'INFO'}, msg)
+        print(msg)
+        return {'FINISHED'}
+
+
+class BAPP_OT_Install(bpy.types.Operator):
+    bl_idname = "bapp.install"
+    bl_label = "Run [bapp]install"
+    bl_description = "Execute the [bapp]install text block"
+
+    def execute(self, context):
+        msg = run_bapp_install(context)
+        self.report({'INFO'}, msg)
+        print(msg)
+        return {'FINISHED'}
+
+
+# =========================================================
+# 🎛️ UI Panel
+# =========================================================
+
+class BAPP_PT_MainPanel(bpy.types.Panel):
+    bl_label = "Bapp"
+    bl_idname = "VIEW3D_PT_bapp"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "Bapp"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+
+        layout.label(text="Bapp Root Directory:")
+        layout.prop(scene, "bapp_root_dir", text="")
+
+        layout.separator()
+        row = layout.row(align=True)
+        row.operator("bapp.save", icon='FILE_TICK')
+        row.operator("bapp.load", icon='FILE_REFRESH')
+
+        layout.separator()
+        layout.operator("bapp.install", icon='PLAY')
+
+
+# =========================================================
+# ⚙️ 注册
+# =========================================================
+
+classes = (
+    BAPP_OT_Save,
+    BAPP_OT_Load,
+    BAPP_OT_Install,
+    BAPP_PT_MainPanel,
+)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.bapp_root_dir = bpy.props.StringProperty(
+        name="Bapp Root Dir",
+        subtype='DIR_PATH',
+        description="Directory where Bapp saves/loads its text blocks"
+    )
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
+    del bpy.types.Scene.bapp_root_dir
+
+if __name__ == "__main__":
+    register()

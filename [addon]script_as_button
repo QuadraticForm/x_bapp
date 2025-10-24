@@ -1,0 +1,93 @@
+bl_info = {
+    "name": "Script As Button",
+    "author": "徐行 + 书星",
+    "version": (1, 3),
+    "blender": (4, 0, 0),
+    "location": "3D View > Sidebar > SAB",
+    "category": "Development",
+    "description": "Run text blocks with [button][group] syntax as file-local tools (Sidebar Panel)",
+}
+
+import bpy
+import re
+from collections import defaultdict
+
+
+# --- Operator ---
+class SAB_OT_run(bpy.types.Operator):
+    bl_idname = "flsr.run_text"
+    bl_label = "Run File-local Script"
+
+    text_name: bpy.props.StringProperty()
+
+    def execute(self, context):
+        text = bpy.data.texts.get(self.text_name)
+        if not text:
+            self.report({'ERROR'}, f"Text '{self.text_name}' not found.")
+            return {'CANCELLED'}
+
+        try:
+            exec(text.as_string(), {})
+            self.report({'INFO'}, f"Executed '{text.name}' successfully.")
+        except Exception as e:
+            self.report({'ERROR'}, f"Error in '{text.name}': {e}")
+        return {'FINISHED'}
+
+
+# --- Sidebar Panel ---
+class SAB_PT_panel(bpy.types.Panel):
+    """Panel showing all [button] scripts."""
+    bl_label = "File Local Scripts"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "SAB"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+
+        scripts_by_group = defaultdict(list)
+        # 支持以下命名形式：
+        # [button][group]name
+        # [button]name
+        pattern = re.compile(r"^\[button\](?:\[(.*?)\])?(.*)$", re.IGNORECASE)
+
+        for text in bpy.data.texts:
+            m = pattern.match(text.name)
+            if not m:
+                continue
+
+            group = (m.group(1) or "Default").strip()
+            label = m.group(2).strip().replace("_", " ")
+
+            if not label:
+                label = "(Unnamed Script)"
+
+            scripts_by_group[group].append((label, text.name))
+
+        if not scripts_by_group:
+            layout.label(text="No [button] scripts found", icon='INFO')
+            return
+
+        # sort groups alphabetically, Default first
+        for group in sorted(scripts_by_group.keys(), key=lambda g: (g != "Default", g.lower())):
+            box = layout.box()
+            col = box.column(align=True)
+            col.label(text=group, icon='FILE_SCRIPT')
+            for label, name in scripts_by_group[group]:
+                col.operator("flsr.run_text", text=label, icon="PLAY").text_name = name
+
+
+# --- Register ---
+classes = (SAB_OT_run, SAB_PT_panel)
+
+def register():
+    for c in classes:
+        bpy.utils.register_class(c)
+
+def unregister():
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)
+
+if __name__ == "__main__":
+    register()

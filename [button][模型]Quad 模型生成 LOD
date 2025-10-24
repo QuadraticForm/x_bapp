@@ -1,0 +1,39 @@
+import bpy
+import bmesh
+
+def x_gen_lod_for_quad_mesh():
+	# Get the current active object
+	obj = bpy.context.view_layer.objects.active
+	
+	if obj is None or obj.type != 'MESH':
+		print("No active mesh object found!")
+		return
+	
+	print(f"Processing object: {obj.name}")
+	
+	# Ensure we're in edit mode
+	bpy.context.view_layer.objects.active = obj
+	bpy.ops.object.mode_set(mode='EDIT')
+	
+	# Create UV Seams
+	bpy.ops.mesh.select_all(action='DESELECT')
+	bpy.ops.mesh.select_all(action='SELECT')
+	bpy.ops.uv.seams_from_islands()
+	
+	# Split mesh by UV seams
+	bm = bmesh.from_edit_mesh(obj.data)
+	seams = [e for e in bm.edges if e.seam]
+	bmesh.ops.split_edges(bm, edges=seams)
+	
+	bmesh.update_edit_mesh(obj.data)
+	
+	
+	# Unsubdivide with 2 iterations
+	bpy.ops.mesh.select_all(action='SELECT')
+	bpy.ops.mesh.unsubdivide(iterations=2)
+	
+	# Remove doubles with threshold
+	bpy.ops.mesh.remove_doubles(threshold=1e-05)
+
+# Call the function to start processing
+x_gen_lod_for_quad_mesh()

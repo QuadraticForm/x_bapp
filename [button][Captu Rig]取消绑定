@@ -1,0 +1,64 @@
+import bpy
+
+#
+# === CONFIGS ===
+#
+ARMATURE_NAME = "captu.def_rig"
+CONSTRAINT_NAME_TO_REMOVE = "Copy Transforms (sync_armature_ws)"
+
+#
+# === UTILITIES ===
+#
+def ensure_visible(obj):
+    """Unhide object and all parent collections temporarily."""
+    hidden_collections = []
+    for coll in bpy.data.collections:
+        if obj.name in coll.objects and coll.hide_viewport:
+            coll.hide_viewport = False
+            hidden_collections.append(coll)
+    obj_hide = obj.hide_viewport
+    obj.hide_viewport = False
+    obj.hide_set(False)
+    return hidden_collections, obj_hide
+
+
+def restore_visibility(obj, hidden_collections, obj_hide):
+    """Restore visibility after operation."""
+    for coll in hidden_collections:
+        coll.hide_viewport = True
+    obj.hide_viewport = obj_hide
+    obj.hide_set(obj_hide)
+
+
+#
+# === MAIN ===
+#
+obj = bpy.data.objects.get(ARMATURE_NAME)
+if not obj or obj.type != 'ARMATURE':
+    raise Exception(f"Object '{ARMATURE_NAME}' not found or not an Armature.")
+
+# temporarily unhide
+hidden_cols, obj_hidden = ensure_visible(obj)
+
+try:
+    prev_mode = obj.mode
+    if obj.mode != 'POSE':
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.mode_set(mode='POSE')
+
+    removed_count = 0
+
+    for bone in obj.pose.bones:
+        for con in list(bone.constraints):
+            if con.name == CONSTRAINT_NAME_TO_REMOVE:
+                bone.constraints.remove(con)
+                removed_count += 1
+                break  # Only remove one per bone
+
+    if obj.mode != prev_mode:
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+    print(f"Removed {removed_count} constraints named '{CONSTRAINT_NAME_TO_REMOVE}' from '{ARMATURE_NAME}'.")
+
+finally:
+    restore_visibility(obj, hidden_cols, obj_hidden)

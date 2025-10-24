@@ -1,0 +1,283 @@
+bl_info = {
+    "name": "x_cam",
+    "author": "徐行 + 书星",
+    "version": (1, 4),
+    "blender": (3, 0, 0),
+    "location": "3D View > Sidebar > XCam",
+    "description": "集中控制渲染相关参数与相机同步",
+    "category": "3D View",
+}
+
+import bpy
+
+# ===============================
+# 🧭 Operator: 将 Scene Camera 设置为 View Local Camera
+# ===============================
+class XCAM_OT_SetLocalToScene(bpy.types.Operator):
+    """将当前 Scene Camera 设置为 View Local Camera"""
+    bl_idname = "xcam.local_to_scene"
+    bl_label = "xcam.local_to_scene"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        cam = scene.camera
+        if not cam:
+            self.report({'WARNING'}, "当前场景没有设置相机！")
+            return {'CANCELLED'}
+
+        area = context.area
+        if area and area.type == 'VIEW_3D':
+            space = area.spaces.active
+            if space and space.type == 'VIEW_3D':
+                space.camera = cam
+                self.report({'INFO'}, f"已将本地相机设置为场景相机：{cam.name}")
+        return {'FINISHED'}
+
+
+# ===============================
+# 🧭 Operator: 将 View Local Camera 设置为 Scene Camera
+# ===============================
+class XCAM_OT_SetSceneToLocal(bpy.types.Operator):
+    """将当前 View Local Camera 设置为 Scene Camera"""
+    bl_idname = "xcam.scene_to_local"
+    bl_label = "xcam.scene_to_local"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        area = context.area
+
+        if area and area.type == 'VIEW_3D':
+            space = area.spaces.active
+            if space and space.type == 'VIEW_3D' and space.camera:
+                scene.camera = space.camera
+                self.report({'INFO'}, f"已将场景相机设置为：{space.camera.name}")
+            else:
+                self.report({'WARNING'}, "当前视图未设置 Local Camera")
+        return {'FINISHED'}
+
+
+# ===============================
+# 🎥 Operator: 切换相机视图（进入/退出相机）
+# ===============================
+class XCAM_OT_ToggleCameraView(bpy.types.Operator):
+    """进入或退出相机视图"""
+    bl_idname = "xcam.toggle_camera_view"
+    bl_label = "进入相机"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        area = context.area
+        if area and area.type == 'VIEW_3D':
+            space = area.spaces.active
+            if space.region_3d.view_perspective == 'CAMERA':
+                space.region_3d.view_perspective = 'PERSP'
+                self.report({'INFO'}, "退出相机视图")
+            else:
+                space.region_3d.view_perspective = 'CAMERA'
+                self.report({'INFO'}, "进入相机视图")
+        return {'FINISHED'}
+
+
+# ===============================
+# 🔗 Operator: 绑定 / 解绑相机与视口
+# ===============================
+class XCAM_OT_ToggleCameraLock(bpy.types.Operator):
+    """绑定或解绑相机和视口"""
+    bl_idname = "xcam.toggle_camera_lock"
+    bl_label = "绑定相机和视口"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        space = context.space_data
+        if space.type == 'VIEW_3D':
+            space.lock_camera = not space.lock_camera
+            if space.lock_camera:
+                self.report({'INFO'}, "已绑定相机和视口（可在相机中导航）")
+            else:
+                self.report({'INFO'}, "已解绑相机和视口")
+        return {'FINISHED'}
+
+
+# ===============================
+# 🖼️ Operator: 渲染当前帧
+# ===============================
+class XCAM_OT_RenderCurrentFrame(bpy.types.Operator):
+    """渲染当前帧"""
+    bl_idname = "xcam.render_current_frame"
+    bl_label = "渲染当前帧"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        bpy.ops.render.render('INVOKE_DEFAULT')
+        return {'FINISHED'}
+
+
+# ===============================
+# 🎯 Operator: 选中相机（小方块按钮）
+# ===============================
+class XCAM_OT_SelectCamera(bpy.types.Operator):
+    """选中指定相机"""
+    bl_idname = "xcam.select_camera"
+    bl_label = "Select Camera"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    camera_name: bpy.props.StringProperty(name="Camera Name")
+
+    def execute(self, context):
+        cam = bpy.data.objects.get(self.camera_name)
+        if not cam:
+            self.report({'WARNING'}, f"未找到对象：{self.camera_name}")
+            return {'CANCELLED'}
+        if cam.type != 'CAMERA':
+            self.report({'WARNING'}, f"对象不是相机：{cam.name}")
+            return {'CANCELLED'}
+
+        # 切到对象模式以避免某些模式下无法切换激活对象
+        if context.mode != 'OBJECT':
+            try:
+                bpy.ops.object.mode_set(mode='OBJECT')
+            except Exception:
+                pass
+
+        # 选中并设为激活
+        view_layer = context.view_layer
+        for obj in view_layer.objects:
+            obj.select_set(False)
+        cam.select_set(True)
+        view_layer.objects.active = cam
+
+        self.report({'INFO'}, f"已选中相机：{cam.name}")
+        return {'FINISHED'}
+
+
+def draw_separator(layout, scale=0.1):
+    box = layout.box()
+    row = box.row()
+    row.scale_y = scale
+    row.label(text="")
+
+# ===============================
+# 🎛️ Panel: XCam 控制面板
+# ===============================
+class XCAM_PT_Panel(bpy.types.Panel):
+    bl_label = "XCam Control"
+    bl_idname = "VIEW3D_PT_xcam"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "XCam"
+
+    def draw(self, context):
+        main_layout = self.layout
+        scene = context.scene
+        render = scene.render
+        ev = scene.view_settings
+        view = context.space_data
+
+        #
+        # ---- 渲染参数 ----
+        #
+        layout = main_layout.box()
+        layout.label(text="── 渲染参数 ──")
+
+        # 渲染器
+        row = layout.row(align=True)
+        split = row.split(factor=0.25)
+        split.label(text="渲染器")
+        split.prop(scene.render, "engine", text="")
+
+        # 曝光
+        row = layout.row(align=True)
+        split = row.split(factor=0.25)
+        split.label(text="曝光")
+        split.prop(ev, "exposure", text="")
+
+        # 分辨率
+        layout.label(text="分辨率")
+        col = layout.column(align=True)
+        row = col.row(align=True)
+        row.prop(render, "resolution_x", text="X")
+        row.prop(render, "resolution_y", text="Y")
+        col.prop(render, "resolution_percentage", text="Scale")
+
+        #
+        # ---- 相机控制 ----
+        #
+        layout = main_layout.box()
+        layout.label(text="── 相机控制 ──")
+        
+        # 进入/退出相机视图 + 绑定/解绑
+        row = layout.row(align=True)
+        space = context.space_data
+        if space.region_3d.view_perspective == 'CAMERA':
+            row.operator("xcam.toggle_camera_view", text="退出相机", depress=True)
+        else:
+            row.operator("xcam.toggle_camera_view", text="进入相机")
+
+        if getattr(space, "lock_camera", False):
+            row.operator("xcam.toggle_camera_lock", text="解绑相机和视口", depress=True)
+        else:
+            row.operator("xcam.toggle_camera_lock", text="绑定相机和视口")
+
+        # 视口相机（Local Camera）
+        row = layout.row(align=True)
+        split = row.split(factor=0.25)
+        split.label(text="视口相机")
+        row_cam = split.row(align=True)
+        if view:
+            row_cam.prop(view, "camera", text="")
+            if view.camera:
+                row_cam.operator("xcam.select_camera", text="", icon='RESTRICT_SELECT_OFF').camera_name = view.camera.name
+        else:
+            split.label(text="(None)")
+            
+        # 上下同步按钮
+        row = layout.row(align=True)
+        row.operator("xcam.local_to_scene", text="↑")
+        row.operator("xcam.scene_to_local", text="↓")
+        
+        # 场景相机
+        row = layout.row(align=True)
+        split = row.split(factor=0.25)
+        split.label(text="场景相机")
+        row_cam = split.row(align=True)
+        row_cam.prop(scene, "camera", text="")
+        if scene.camera:
+            row_cam.operator("xcam.select_camera", text="", icon='RESTRICT_SELECT_OFF').camera_name = scene.camera.name
+        
+
+        # 渲染当前帧
+        layout = main_layout
+        layout.separator()
+        
+        scene_camera_name = ""
+        if scene.camera:
+            scene_camera_name = scene.camera.name
+        
+        layout.operator("xcam.render_current_frame", text=f"渲染 {scene_camera_name}", icon='RENDER_STILL')
+
+
+# ===============================
+# 🔧 Register
+# ===============================
+classes = (
+    XCAM_OT_SetLocalToScene,
+    XCAM_OT_SetSceneToLocal,
+    XCAM_OT_ToggleCameraView,
+    XCAM_OT_ToggleCameraLock,
+    XCAM_OT_RenderCurrentFrame,
+    XCAM_OT_SelectCamera,   # 新增的选中相机按钮
+    XCAM_PT_Panel,
+)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
+
+if __name__ == "__main__":
+    register()

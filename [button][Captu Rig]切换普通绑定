@@ -1,0 +1,90 @@
+import bpy
+
+# === COPY TRANSFORMS CONSTRAINT SETUP BETWEEN TWO ARMATURES ===
+# In Blender constraint terms:
+#   Source = Armature that owns the constraint (depends on target)
+#   Target = Armature that the source follows (provides data)
+
+#
+# === CONFIGS ===
+#
+
+SOURCE_ARMATURE_NAME = "captu.def_rig"     # 被驱动方（约束建立在它上面）
+TARGET_ARMATURE_NAME = "captu.rig.origin"  # 驱动方（被依赖的数据源）
+CONSTRAINT_NAME = "Copy Transforms (sync_armature_ws)"
+
+#
+# === CODE ===
+#
+
+# --- utility functions ---
+def ensure_visible(obj):
+    """Unhide object and all parent collections temporarily."""
+    hidden_collections = []
+    for coll in bpy.data.collections:
+        if obj.name in coll.objects and coll.hide_viewport:
+            coll.hide_viewport = False
+            hidden_collections.append(coll)
+    obj_hide = obj.hide_viewport
+    obj.hide_viewport = False
+    obj.hide_set(False)
+    return hidden_collections, obj_hide
+
+
+def restore_visibility(obj, hidden_collections, obj_hide):
+    """Restore visibility after operation."""
+    for coll in hidden_collections:
+        coll.hide_viewport = True
+    obj.hide_viewport = obj_hide
+    obj.hide_set(obj_hide)
+
+
+# --- main ---
+source_obj = bpy.data.objects.get(SOURCE_ARMATURE_NAME)
+target_obj = bpy.data.objects.get(TARGET_ARMATURE_NAME)
+
+if not source_obj or source_obj.type != 'ARMATURE':
+    raise Exception(f"Source armature '{SOURCE_ARMATURE_NAME}' not found or not an Armature.")
+if not target_obj or target_obj.type != 'ARMATURE':
+    raise Exception(f"Target armature '{TARGET_ARMATURE_NAME}' not found or not an Armature.")
+
+# temporarily unhide source to allow editing
+hidden_cols, obj_hidden = ensure_visible(source_obj)
+
+try:
+    prev_mode = source_obj.mode
+    if source_obj.mode != 'POSE':
+        bpy.context.view_layer.objects.active = source_obj
+        bpy.ops.object.mode_set(mode='POSE')
+
+    # clear old constraints
+    for bone in source_obj.pose.bones:
+        for con in bone.constraints:
+            if con.name == CONSTRAINT_NAME:
+                bone.constraints.remove(con)
+                break
+
+    # restore previous mode
+    if source_obj.mode != prev_mode:
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+    print("All previous constraints cleared from source armature.")
+
+    # add new constraints
+    for pbone in source_obj.pose.bones:
+        if pbone.name not in target_obj.pose.bones:
+            print(f"Bone '{pbone.name}' not found in target armature; skipping.")
+            continue
+
+        ct = pbone.constraints.new(type='COPY_TRANSFORMS')
+        ct.name = CONSTRAINT_NAME
+        ct.target = target_obj
+        ct.subtarget = pbone.name
+        ct.target_space = 'WORLD'
+        ct.owner_space = 'WORLD'
+
+    print("Copy Transforms constraints set up for matching bones.")
+
+finally:
+    # restore hidden state
+    restore_visibility(source_obj, hidden_cols, obj_hidden)

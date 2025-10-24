@@ -1,0 +1,62 @@
+import bpy
+
+# ====================================
+# 🐟 CAPTU CONFIG
+# ====================================
+
+# 控制两种品质是否启用
+ENABLE_NORMAL = True
+ENABLE_FAST = False
+
+# 对象名称配置
+CAPTU_BODY_NAME = "captu.body"
+CAPTU_BODY_FAST_NAME = "captu.body_fast"
+FACIAL_HAIR_OBJ_NAME = "captu.facial_hair_surface"
+
+# 修改器关键字配置
+MODIFIER_KEYWORD_RUNTIME = "(Runtime)"
+MODIFIER_KEYWORD_RUNTIME_FAST = "(Runtime Fast)"
+
+# ====================================
+# 🐟 INTERNAL HELPERS
+# ====================================
+def set_object_visibility(obj_name, visible):
+    obj = bpy.data.objects.get(obj_name)
+    if obj:
+        obj.hide_viewport = not visible
+        obj.hide_render = not visible
+        print(f"{'Enabled' if visible else 'Disabled'} object '{obj_name}'")
+    else:
+        print(f"⚠️ Object '{obj_name}' not found")
+
+def set_modifiers_visibility(obj_name, keyword, visible):
+    obj = bpy.data.objects.get(obj_name)
+    if not obj:
+        print(f"⚠️ Object '{obj_name}' not found for modifier operation")
+        return
+    for m in obj.modifiers:
+        if keyword in m.name:
+            m.show_viewport = visible
+            m.show_render = visible
+            print(f"{'Enabled' if visible else 'Disabled'} modifier '{m.name}'")
+
+# ====================================
+# 🐟 MAIN LOGIC
+# ====================================
+def captu_apply_quality_config():
+    print("🐟 Applying Captu quality configuration...")
+
+    # 普通版设置
+    set_object_visibility(CAPTU_BODY_NAME, ENABLE_NORMAL)
+    set_modifiers_visibility(FACIAL_HAIR_OBJ_NAME, MODIFIER_KEYWORD_RUNTIME, ENABLE_NORMAL)
+
+    # Fast 版设置
+    set_object_visibility(CAPTU_BODY_FAST_NAME, ENABLE_FAST)
+    set_modifiers_visibility(FACIAL_HAIR_OBJ_NAME, MODIFIER_KEYWORD_RUNTIME_FAST, ENABLE_FAST)
+
+    print("✅ Captu quality configuration applied.")
+
+# ====================================
+# 🐟 EXECUTE
+# ====================================
+captu_apply_quality_config()

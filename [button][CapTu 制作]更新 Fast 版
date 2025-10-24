@@ -1,0 +1,90 @@
+import bpy
+import bmesh
+
+# ===============================
+# CONFIG
+# ===============================
+CAPTU_BODY_NAME = "captu.body"
+CAPTU_BODY_FAST_NAME = "captu.body_fast"
+
+# ===============================
+# HELPER
+# ===============================
+def x_gen_lod_for_quad_mesh():
+    # Get the current active object
+    obj = bpy.context.view_layer.objects.active
+    
+    if obj is None or obj.type != 'MESH':
+        print("No active mesh object found!")
+        return
+    
+    print(f"Processing object: {obj.name}")
+    
+    # Ensure we're in edit mode
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # Create UV Seams
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.seams_from_islands()
+    
+    # Split mesh by UV seams
+    bm = bmesh.from_edit_mesh(obj.data)
+    seams = [e for e in bm.edges if e.seam]
+    bmesh.ops.split_edges(bm, edges=seams)
+    bmesh.update_edit_mesh(obj.data)
+    
+    # Unsubdivide with 2 iterations
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.unsubdivide(iterations=2)
+    
+    # Remove doubles with threshold
+    bpy.ops.mesh.remove_doubles(threshold=1e-05)
+
+# ===============================
+# MAIN
+# ===============================
+def captu_gen_body_fast():
+    # Step 0: 确保在 Object Mode
+    if bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode='OBJECT')
+    
+    # Step 1: 获取并激活 captu.body
+    src_obj = bpy.data.objects.get(CAPTU_BODY_NAME)
+    if not src_obj:
+        print(f"Source object '{CAPTU_BODY_NAME}' not found!")
+        return
+    
+    bpy.ops.object.select_all(action='DESELECT')
+    src_obj.select_set(True)
+    bpy.context.view_layer.objects.active = src_obj
+    
+    # Step 2: 复制对象
+    bpy.ops.object.duplicate()
+    temp_obj = bpy.context.view_layer.objects.active
+    temp_obj_name = temp_obj.name
+    print(f"Temporary object created: {temp_obj_name}")
+    
+    # Step 3: 执行 un-subdivide
+    x_gen_lod_for_quad_mesh()
+    
+    # Step 4: 把 mesh data 赋给 captu.body_fast
+    tgt_obj = bpy.data.objects.get(CAPTU_BODY_FAST_NAME)
+    if not tgt_obj:
+        print(f"Target object '{CAPTU_BODY_FAST_NAME}' not found!")
+    else:
+        tgt_obj.data = temp_obj.data
+        print(f"Linked mesh data from '{temp_obj_name}' → '{tgt_obj.name}'")
+    
+    # Step 5: 删除临时对象
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.data.objects.remove(temp_obj, do_unlink=True)
+    print(f"Deleted temporary object '{temp_obj_name}'")
+    
+    print("captu.body_fast generation complete!")
+
+# ===============================
+# EXECUTE
+# ===============================
+captu_gen_body_fast()
