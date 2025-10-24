@@ -37,10 +37,10 @@ class SAB_OT_run(bpy.types.Operator):
 # --- Sidebar Panel ---
 class SAB_PT_panel(bpy.types.Panel):
     """Panel showing all [button] scripts."""
-    bl_label = "File Local Scripts"
+    bl_label = "Scripts As Buttons"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "SAB"
+    bl_category = "Bapp"
 
     def draw(self, context):
         layout = self.layout
