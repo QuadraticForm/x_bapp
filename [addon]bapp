@@ -1,7 +1,7 @@
 bl_info = {
     "name": "bapp",
     "author": "徐行 + 书星",
-    "version": (1, 0),
+    "version": (1, 1),
     "blender": (3, 0, 0),
     "location": "3D View > Sidebar > Bapp",
     "description": "Blender App Manager - save/load text blocks to a folder",
@@ -10,6 +10,8 @@ bl_info = {
 
 import bpy
 import os
+import traceback
+import __main__
 
 
 # =========================================================
@@ -62,16 +64,54 @@ def load_bapp_texts(context):
     return f"✅ Loaded {len(loaded)} text files from: {root}" if loaded else "⚠️ No files found in bapp directory."
 
 
-def run_bapp_install(context):
-    """执行名为 [bapp]install 的 text block"""
+# =========================================================
+# 🧠 Text Editor 上下文执行逻辑
+# =========================================================
+
+def _find_text_editor_context():
+    """查找 Text Editor 上下文"""
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'TEXT_EDITOR':
+                ctx = {
+                    "window": window,
+                    "screen": window.screen,
+                    "area": area,
+                    "region": area.regions[-1],
+                }
+                return ctx
+    return None
+
+
+def _run_install_in_text_context():
+    """真正执行 [bapp]install（延迟执行函数）"""
     install_block = bpy.data.texts.get("[bapp]install")
     if not install_block:
-        return "⚠️ [bapp]install not found."
+        print("⚠️ [bapp]install not found.")
+        return None
+
+    code = install_block.as_string()
+    ctx = _find_text_editor_context()
+
     try:
-        exec(install_block.as_string(), {})
-        return "✅ Executed [bapp]install successfully."
-    except Exception as e:
-        return f"❌ Error executing install: {e}"
+        if ctx:
+            print("🟦 Running [bapp]install inside TEXT_EDITOR context")
+        else:
+            print("⚠️ No TEXT_EDITOR found, running in current context")
+
+        exec(compile(code, "[bapp]install", "exec"), __main__.__dict__)
+        print("✅ [bapp]install executed successfully.")
+    except Exception:
+        traceback.print_exc()
+
+    # 不重复执行
+    return None
+
+
+def run_bapp_install(context):
+    """调度 [bapp]install 延迟执行"""
+    bpy.app.timers.register(_run_install_in_text_context, first_interval=0.1)
+    return "⏳ [bapp]install scheduled to run safely."
 
 
 # =========================================================
