@@ -207,18 +207,41 @@ class XCAM_PT_Panel(bpy.types.Panel):
         layout = main_layout.box()
         layout.label(text="── 相机控制 ──")
         
-        # 进入/退出相机视图 + 绑定/解绑
+                # 进入/退出相机视图 + 绑定/解绑
         row = layout.row(align=True)
         space = context.space_data
-        if space.region_3d.view_perspective == 'CAMERA':
-            row.operator("xcam.toggle_camera_view", text="退出相机", depress=True)
-        else:
-            row.operator("xcam.toggle_camera_view", text="进入相机")
 
-        if getattr(space, "lock_camera", False):
-            row.operator("xcam.toggle_camera_lock", text="解绑相机和视口", depress=True)
+        # 相机视图切换按钮
+        if space.region_3d.view_perspective == 'CAMERA':
+            row.operator(
+                "xcam.toggle_camera_view",
+                text="退出相机",
+                icon='HIDE_OFF',  # 代表显示/退出状态
+                depress=True
+            )
         else:
-            row.operator("xcam.toggle_camera_lock", text="绑定相机和视口")
+            row.operator(
+                "xcam.toggle_camera_view",
+                text="进入相机",
+                icon='CAMERA_DATA'  # 代表进入相机
+            )
+
+        # 绑定 / 解绑 相机与视口
+        is_locked = getattr(space, "lock_camera", False)
+        if is_locked:
+            row.operator(
+                "xcam.toggle_camera_lock",
+                text="解绑相机和视口",
+                icon='LOCKED',  # 锁定状态图标
+                depress=True
+            )
+        else:
+            row.operator(
+                "xcam.toggle_camera_lock",
+                text="绑定相机和视口",
+                icon='UNLOCKED'  # 未锁定状态图标
+            )
+
 
         # 视口相机（Local Camera）
         row = layout.row(align=True)
@@ -246,16 +269,33 @@ class XCAM_PT_Panel(bpy.types.Panel):
         if scene.camera:
             row_cam.operator("xcam.select_camera", text="", icon='RESTRICT_SELECT_OFF').camera_name = scene.camera.name
         
-
+        #
         # 渲染当前帧
+        #
+        
         layout = main_layout
         layout.separator()
-        
+
         scene_camera_name = ""
         if scene.camera:
             scene_camera_name = scene.camera.name
-        
-        layout.operator("xcam.render_current_frame", text=f"渲染 {scene_camera_name}", icon='RENDER_STILL')
+
+        # 检查视口相机和场景相机是否不同
+        view_cam = view.camera if view else None
+        scene_cam = scene.camera
+        cameras_differ = view_cam and scene_cam and (view_cam != scene_cam)
+
+        if cameras_differ:
+            # 提示：当前视口相机和场景相机不同
+            warn_row = layout.row()
+            warn_row.alert = True
+            warn_row.label(text="注意：当前视口相机和场景相机不同", icon='ERROR')
+
+        # 渲染按钮
+        row = layout.row()
+        if cameras_differ:
+            row.alert = True  # 红色按钮
+        row.operator("xcam.render_current_frame", text=f"渲染 {scene_camera_name}", icon='RENDER_STILL')
 
 
 # ===============================

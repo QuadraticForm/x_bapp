@@ -1,5 +1,19 @@
 import bpy
 
+
+DEF_RIG_NAME = "captu.def_rig"
+ORIGIN_RIG_NAME = "captu.rig.origin"
+HIGH_HEELS_RIG_NAME = "captu.rig.high_heels"
+
+origin = bpy.data.objects.get(ORIGIN_RIG_NAME)
+high_heels = bpy.data.objects.get(HIGH_HEELS_RIG_NAME)
+
+origin.hide_viewport = True
+origin.hide_render = True
+high_heels.hide_viewport = False
+high_heels.hide_render = False
+
+
 # === COPY TRANSFORMS CONSTRAINT SETUP BETWEEN TWO ARMATURES ===
 # In Blender constraint terms:
 #   Source = Armature that owns the constraint (depends on target)
@@ -9,8 +23,8 @@ import bpy
 # === CONFIGS ===
 #
 
-SOURCE_ARMATURE_NAME = "captu.def_rig"          # 被驱动方（约束建立在它上面）
-TARGET_ARMATURE_NAME = "captu.rig.high_heels"   # 驱动方（被依赖的数据源）
+SOURCE_ARMATURE_NAME = DEF_RIG_NAME          # 被驱动方（约束建立在它上面）
+TARGET_ARMATURE_NAME = HIGH_HEELS_RIG_NAME   # 驱动方（被依赖的数据源）
 CONSTRAINT_NAME = "Copy Transforms (sync_armature_ws)"
 
 #

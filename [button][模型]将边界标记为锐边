@@ -1,0 +1,31 @@
+import bpy
+import bmesh
+
+# 获取当前活动对象
+obj = bpy.context.active_object
+if not obj or obj.type != 'MESH':
+    raise TypeError("⚠️ 当前活动对象不是网格（Mesh）。")
+
+# 进入编辑模式并获取 BMesh
+bpy.ops.object.mode_set(mode='EDIT')
+bm = bmesh.from_edit_mesh(obj.data)
+
+# 确保法线等信息是最新的
+#bm.normal_update()
+
+# 清除所有已有的 sharp 标记（可选）
+#for e in bm.edges:
+#    e.smooth = True
+
+# 找出非流形边并标记为 sharp
+count = 0
+for e in bm.edges:
+    if not e.is_manifold:
+        e.smooth = False
+        count += 1
+
+# 更新 mesh
+bmesh.update_edit_mesh(obj.data)
+bpy.ops.object.mode_set(mode='OBJECT')
+
+print(f"✅ 已标记 {count} 条非流形边为 Sharp。")
