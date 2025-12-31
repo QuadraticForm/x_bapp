@@ -1,0 +1,267 @@
+import bpy
+from mathutils import Matrix
+
+# =========================================================
+# User Config
+# =========================================================
+ANIM_RIG_NAME      = "captu.body_rig"         # UE Anim Rig Armature 对象名
+ANIM_REF_RIG_NAME  = "captu.body_rig.ref"     # 复制出来的参考 Rig 对象名
+ARP_RIG_NAME       = "captu.control_rig"      # ARP Rig Armature 对象名
+CONSTRAINT_PREFIX  = "(ARPDRV) "              # 约束名前缀：用于清理/区分脚本加的约束
+
+# Child Of：是否跟随位置/旋转/缩放
+CHILDOF_USE_LOCATION = True
+CHILDOF_USE_ROTATION = True
+CHILDOF_USE_SCALE    = True
+
+# =========================================================
+# Anim(UE) -> ARP mapping
+# =========================================================
+BONE_MAP = {
+    # ---- Global / Root ----
+    "root":   "c_traj",
+    "pelvis": "root.x",
+
+    # ---- Spine / Head ----
+    "spine_01": "spine_01.x",
+    "spine_02": "spine_02.x",
+    "spine_03": "spine_03.x",
+    "neck_01":  "neck.x",
+    "head":     "head.x",
+
+    # ---- Left Arm ----
+    "clavicle_l": "shoulder.l",   # <-- updated
+    "upperarm_l": "arm.l",
+    "lowerarm_l": "forearm.l",
+    "hand_l":     "hand.l",
+
+    # ---- Right Arm ----
+    "clavicle_r": "shoulder.r",   # <-- updated
+    "upperarm_r": "arm.r",
+    "lowerarm_r": "forearm.r",
+    "hand_r":     "hand.r",
+
+    # ---- Left Leg ----
+    "thigh_l": "thigh.l",
+    "calf_l":  "leg.l",
+    "foot_l":  "foot.l",
+    "ball_l":  "toes_01.l",
+
+    # ---- Right Leg ----
+    "thigh_r": "thigh.r",
+    "calf_r":  "leg.r",
+    "foot_r":  "foot.r",
+    "ball_r":  "toes_01.r",
+
+    # ---- Left Hand Fingers (meta + 01/02/03) ----
+    "thumb_meta_l":  "c_thumb1_base.l",
+    "thumb_01_l":    "thumb1.l",
+    "thumb_02_l":    "c_thumb2.l",
+    "thumb_03_l":    "c_thumb3.l",
+
+    "index_meta_l":  "c_index1_base.l",
+    "index_01_l":    "index1.l",
+    "index_02_l":    "c_index2.l",
+    "index_03_l":    "c_index3.l",
+
+    "middle_meta_l": "c_middle1_base.l",
+    "middle_01_l":   "middle1.l",
+    "middle_02_l":   "c_middle2.l",
+    "middle_03_l":   "c_middle3.l",
+
+    "ring_meta_l":   "c_ring1_base.l",
+    "ring_01_l":     "ring1.l",
+    "ring_02_l":     "c_ring2.l",
+    "ring_03_l":     "c_ring3.l",
+
+    "pinky_meta_l":  "c_pinky1_base.l",
+    "pinky_01_l":    "pinky1.l",
+    "pinky_02_l":    "c_pinky2.l",
+    "pinky_03_l":    "c_pinky3.l",
+
+    # ---- Right Hand Fingers ----
+    "thumb_meta_r":  "c_thumb1_base.r",
+    "thumb_01_r":    "thumb1.r",
+    "thumb_02_r":    "c_thumb2.r",
+    "thumb_03_r":    "c_thumb3.r",
+
+    "index_meta_r":  "c_index1_base.r",
+    "index_01_r":    "index1.r",
+    "index_02_r":    "c_index2.r",
+    "index_03_r":    "c_index3.r",
+
+    "middle_meta_r": "c_middle1_base.r",
+    "middle_01_r":   "middle1.r",
+    "middle_02_r":   "c_middle2.r",
+    "middle_03_r":   "c_middle3.r",
+
+    "ring_meta_r":   "c_ring1_base.r",
+    "ring_01_r":     "ring1.r",
+    "ring_02_r":     "c_ring2.r",
+    "ring_03_r":     "c_ring3.r",
+
+    "pinky_meta_r":  "c_pinky1_base.r",
+    "pinky_01_r":    "pinky1.r",
+    "pinky_02_r":    "c_pinky2.r",
+    "pinky_03_r":    "c_pinky3.r",
+}
+
+# =========================================================
+# Helpers
+# =========================================================
+def get_obj(name: str) -> bpy.types.Object:
+    obj = bpy.data.objects.get(name)
+    if obj is None:
+        raise RuntimeError(f"找不到对象：{name}")
+    if obj.type != "ARMATURE":
+        raise RuntimeError(f"对象不是 Armature：{name}")
+    return obj
+
+def link_object_to_same_collection(new_obj: bpy.types.Object, src_obj: bpy.types.Object):
+    if src_obj.users_collection:
+        src_obj.users_collection[0].objects.link(new_obj)
+    else:
+        bpy.context.scene.collection.objects.link(new_obj)
+
+def ensure_anim_ref_rig(anim_obj: bpy.types.Object, ref_name: str) -> bpy.types.Object:
+    ref_obj = bpy.data.objects.get(ref_name)
+    if ref_obj:
+        if ref_obj.type != "ARMATURE":
+            raise RuntimeError(f"{ref_name} 存在但不是 Armature")
+        # 保险起见：清 pose 到 rest
+        for pb in ref_obj.pose.bones:
+            pb.matrix_basis.identity()
+        ref_obj.animation_data_clear()
+        return ref_obj
+
+    # Duplicate object + armature data
+    ref_obj = anim_obj.copy()
+    ref_obj.data = anim_obj.data.copy()
+    ref_obj.name = ref_name
+    ref_obj.data.name = ref_name + "_Data"
+    ref_obj.matrix_world = anim_obj.matrix_world.copy()
+
+    link_object_to_same_collection(ref_obj, anim_obj)
+
+    # Default hidden (as requested)
+    ref_obj.hide_select = True
+    ref_obj.hide_render = True
+    ref_obj.hide_viewport = True
+    ref_obj.show_in_front = False
+
+    ref_obj.animation_data_clear()
+
+    # Force pose to rest
+    for pb in ref_obj.pose.bones:
+        pb.matrix_basis.identity()
+
+    return ref_obj
+
+def clear_script_constraints(anim_obj: bpy.types.Object):
+    removed = 0
+    for pb in anim_obj.pose.bones:
+        for c in list(pb.constraints):
+            if c.name.startswith(CONSTRAINT_PREFIX):
+                pb.constraints.remove(c)
+                removed += 1
+    return removed
+
+def configure_childof_channels(c):
+    c.use_location_x = CHILDOF_USE_LOCATION
+    c.use_location_y = CHILDOF_USE_LOCATION
+    c.use_location_z = CHILDOF_USE_LOCATION
+    c.use_rotation_x = CHILDOF_USE_ROTATION
+    c.use_rotation_y = CHILDOF_USE_ROTATION
+    c.use_rotation_z = CHILDOF_USE_ROTATION
+    c.use_scale_x = CHILDOF_USE_SCALE
+    c.use_scale_y = CHILDOF_USE_SCALE
+    c.use_scale_z = CHILDOF_USE_SCALE
+
+def set_childof_inverse_world(owner_arm: bpy.types.Object,
+                              owner_pb: bpy.types.PoseBone,
+                              childof_c: bpy.types.Constraint,
+                              target_arm: bpy.types.Object,
+                              target_bone_name: str,
+                              desired_owner_world: Matrix):
+    target_pb = target_arm.pose.bones.get(target_bone_name)
+    if target_pb is None:
+        raise RuntimeError(f"ARP 缺少骨骼：{target_bone_name}")
+
+    target_world = target_arm.matrix_world @ target_pb.matrix
+    inv = target_world.inverted() @ desired_owner_world
+    childof_c.inverse_matrix = inv
+
+# =========================================================
+# Main
+# =========================================================
+def main():
+    anim_obj = get_obj(ANIM_RIG_NAME)
+    arp_obj  = get_obj(ARP_RIG_NAME)
+    ref_obj  = ensure_anim_ref_rig(anim_obj, ANIM_REF_RIG_NAME)
+
+    removed = clear_script_constraints(anim_obj)
+
+    missing_anim = []
+    missing_arp = []
+    added_pairs = 0
+
+    # Only process bones that appear in BONE_MAP (as requested)
+    for bone_name, arp_bone in BONE_MAP.items():
+        anim_pb = anim_obj.pose.bones.get(bone_name)
+        if anim_pb is None:
+            missing_anim.append(bone_name)
+            continue
+
+        if bone_name not in ref_obj.pose.bones:
+            missing_anim.append(bone_name)
+            continue
+
+        if arp_bone not in arp_obj.pose.bones:
+            missing_arp.append((bone_name, arp_bone))
+            continue
+
+        # (A) Reset to ref (World->World Replace)
+        c_reset = anim_pb.constraints.new(type="COPY_TRANSFORMS")
+        c_reset.name = f"{CONSTRAINT_PREFIX}RESET"
+        c_reset.target = ref_obj
+        c_reset.subtarget = bone_name
+        c_reset.owner_space = "WORLD"
+        c_reset.target_space = "WORLD"
+        if hasattr(c_reset, "mix_mode"):
+            c_reset.mix_mode = "REPLACE"
+        c_reset.influence = 1.0
+
+        # (B) Follow ARP (Child Of World->World)
+        c_follow = anim_pb.constraints.new(type="CHILD_OF")
+        c_follow.name = f"{CONSTRAINT_PREFIX}FOLLOW"
+        c_follow.target = arp_obj
+        c_follow.subtarget = arp_bone
+        c_follow.owner_space = "WORLD"
+        c_follow.target_space = "WORLD"
+        configure_childof_channels(c_follow)
+        c_follow.influence = 1.0
+
+        # Set inverse (equivalent to UI button)
+        #ref_pb = ref_obj.pose.bones[bone_name]
+        #desired_owner_world = ref_obj.matrix_world @ ref_pb.matrix
+        #set_childof_inverse_world(anim_obj, anim_pb, c_follow, arp_obj, arp_bone, desired_owner_world)
+
+        added_pairs += 1
+
+    print("========================================")
+    print("[OK] Reset-to-Ref + ChildOf-to-ARP applied")
+    print(f"  Anim Rig      : {ANIM_RIG_NAME}")
+    print(f"  Anim Ref Rig  : {ANIM_REF_RIG_NAME} (hidden by default)")
+    print(f"  ARP Rig       : {ARP_RIG_NAME}")
+    print(f"  Removed old constraints: {removed}")
+    print(f"  Added constraint pairs : {added_pairs} bones")
+    if missing_anim:
+        print(f"  [WARN] Anim/Ref 缺少这些骨（会跳过）：{missing_anim}")
+    if missing_arp:
+        print("  [WARN] ARP 缺少这些映射骨（会跳过）：")
+        for a, t in missing_arp:
+            print(f"    Anim '{a}' -> ARP '{t}' not found")
+    print("Tip: 为了最稳的 offset，请在 ARP 处于参考姿势(T/A pose 或 Rest)时运行。")
+    print("========================================")
+
+main()

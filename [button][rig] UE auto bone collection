@@ -1,0 +1,94 @@
+import bpy
+
+# -------------------------
+# Config
+# -------------------------
+COL_ANIM = "Anim"
+COL_DEFORM = "Deform"
+COL_CORR = "Corrective"
+COL_MECH = "Mechanism"
+
+# Case-insensitive substring match
+CORRECTIVE_TOKENS = ("_twist", "_tendon")   # 可自己加 "_fan" 等
+MECHANISM_TOKENS  = ("_swing", "_ref")      # 可自己加 "mch_" 等
+
+
+def get_active_armature_object():
+    obj = bpy.context.object
+    if not obj or obj.type != "ARMATURE":
+        raise RuntimeError("请先选中一个 Armature 对象再运行脚本。")
+    return obj
+
+
+def ensure_pose_mode(obj):
+    # BoneCollection.assign 接受 Bone / PoseBone / EditBone；
+    # 用 PoseBone 最稳，直接切 Pose 模式
+    if bpy.context.mode != "POSE":
+        bpy.ops.object.mode_set(mode="POSE")
+
+
+def get_or_create_bone_collection(arm_data, name: str):
+    # Blender 4.0+ bone collections API
+    col = arm_data.collections.get(name)
+    if col is None:
+        col = arm_data.collections.new(name)
+    return col
+
+
+def matches_any(name_lower: str, tokens) -> bool:
+    return any(t in name_lower for t in tokens)
+
+
+def main():
+    arm_obj = get_active_armature_object()
+    arm_data = arm_obj.data
+
+    if not hasattr(arm_data, "collections"):
+        raise RuntimeError("当前 Blender 版本看起来不是 Bone Collections(4.0+)；请升级到 4.x 或让我给你写 3.6 的 Layer 版。")
+
+    ensure_pose_mode(arm_obj)
+
+    # Create / get collections
+    col_anim   = get_or_create_bone_collection(arm_data, COL_ANIM)
+    col_deform = get_or_create_bone_collection(arm_data, COL_DEFORM)
+    col_corr   = get_or_create_bone_collection(arm_data, COL_CORR)
+    col_mech   = get_or_create_bone_collection(arm_data, COL_MECH)
+
+    target_cols = (col_anim, col_deform, col_corr, col_mech)
+
+    # Optional: clear existing assignments to these 4 collections for a clean rebuild
+    # (If you want to keep old assignments, set CLEAR_OLD = False)
+    CLEAR_OLD = True
+
+    pbones = arm_obj.pose.bones
+
+    for pb in pbones:
+        b = pb.bone
+        n = b.name
+        nl = n.lower()
+
+        # Clear old membership in our 4 collections
+        if CLEAR_OLD:
+            for col in target_cols:
+                try:
+                    col.unassign(pb)  # Blender 4.x supports this; if not, it'll except
+                except Exception:
+                    pass
+
+        # Classify main bucket (Anim / Corrective / Mechanism)
+        if matches_any(nl, MECHANISM_TOKENS):
+            col_mech.assign(pb)
+        elif matches_any(nl, CORRECTIVE_TOKENS):
+            col_corr.assign(pb)
+        else:
+            col_anim.assign(pb)
+
+        # Deform bucket by use_deform flag (can overlap with others)
+        if b.use_deform:
+            col_deform.assign(pb)
+
+    print(f"[OK] Bone Collections ready: {COL_ANIM}, {COL_DEFORM}, {COL_CORR}, {COL_MECH}")
+    print("Tip: 想让 upperarm 不进 Deform，就把该骨的 Bone > Deform 关掉即可。")
+
+
+main()

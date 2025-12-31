@@ -1,7 +1,7 @@
 """
 install.py — 自动安装当前 .blend 文件中带有 [addon] 前缀的插件文本块（支持热更新）
 
-TODO: this can't hot reload addons when called from SAB
+TODO: this can't hot reload addons when called from Scripts As Buttons
 
 功能：
 1. 扫描所有 [addon] 开头的 Text Block；

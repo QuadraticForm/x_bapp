@@ -1,0 +1,76 @@
+import bpy
+
+def bake_final_object():
+    # 获取当前 active 对象
+    src = bpy.context.active_object
+    if src is None:
+        raise ValueError("没有 active 物体，无法 Bake")
+
+    # 只处理有几何意义的类型
+    convertible_types = {
+        'MESH',
+        'CURVE',
+        'SURFACE',
+        'FONT',
+        'META',
+        'GPENCIL',
+        'CURVES',      # 新的 hair curves
+        'POINTCLOUD',
+    }
+
+    if src.type not in convertible_types:
+        raise TypeError(f"不支持的物体类型：{src.type}，无法 Bake。")
+
+    # 记录当前模式
+    prev_mode = src.mode
+    if prev_mode != 'OBJECT' and bpy.ops.object.mode_set.poll():
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    # 记录 & 清空原有选择，只保留 src 选中，避免误操作其他物体
+    prev_selection = list(bpy.context.selected_objects)
+    for obj in prev_selection:
+        obj.select_set(False)
+    src.select_set(True)
+    bpy.context.view_layer.objects.active = src
+
+    # 复制物体
+    bpy.ops.object.duplicate()
+    baked_obj = bpy.context.active_object
+
+    # 重命名
+    baked_obj.name = src.name + "_baked"
+
+    # 根据类型决定 target：
+    # - 对 MESH / CURVE / GPENCIL / CURVES / POINTCLOUD：保持原类型，只是烤 modifiers
+    # - 对 FONT / SURFACE / META：统一转成 MESH
+    if src.type in {'MESH', 'CURVE', 'GPENCIL', 'CURVES', 'POINTCLOUD'}:
+        target = src.type
+    elif src.type in {'FONT', 'SURFACE', 'META'}:
+        target = 'MESH'
+    else:
+        # 理论上前面已经过滤，这里只是兜底
+        target = 'MESH'
+
+    # 转换（相当于 Apply 所有 modifier / geometry）
+    if bpy.ops.object.convert.poll():
+        bpy.ops.object.convert(target=target)
+    else:
+        raise RuntimeError("无法执行 object.convert 操作，可能当前上下文不支持。")
+
+    # 恢复原选择（外加新烤出来的对象）
+    baked_obj.select_set(True)
+    for obj in prev_selection:
+        obj.select_set(True)
+
+    # 尝试恢复之前的模式（如果还在场景里）
+    if bpy.ops.object.mode_set.poll() and prev_mode != 'OBJECT':
+        try:
+            bpy.ops.object.mode_set(mode=prev_mode)
+        except Exception:
+            # 如果切不回去就算了，不是致命问题
+            pass
+
+    print(f"✔ Baked Final {target}: {baked_obj.name}")
+
+# ==== 执行 ====
+bake_final_object()

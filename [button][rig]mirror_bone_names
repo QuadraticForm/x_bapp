@@ -1,0 +1,194 @@
+import bpy
+from mathutils import Vector
+
+# =========================
+# Config
+# =========================
+TOLERANCE = 1e-4          # 匹配容差（越大越宽松）
+MIRROR_AXIS = "X"         # 左右镜像轴：通常是 X
+
+# 你给的“左侧标记”及其右侧替换
+LEFT_TO_RIGHT = [
+    ("_l", "_r"),
+    (".l", ".r"),
+    ("left", "right"),
+    ("Left", "Right"),
+]
+
+# （可选）如果你不想支持右->左，把下面关掉即可
+ALLOW_REVERSE_SWAP = True
+RIGHT_TO_LEFT = [
+    ("_r", "_l"),
+    (".r", ".l"),
+    ("right", "left"),
+    ("Right", "Left"),
+]
+
+
+# =========================
+# Helpers
+# =========================
+def ensure_armature_edit_mode():
+    obj = bpy.context.active_object
+    if not obj or obj.type != 'ARMATURE':
+        raise RuntimeError("请先选中一个 Armature 对象作为 active。")
+    if bpy.context.mode != 'EDIT_ARMATURE':
+        raise RuntimeError("请切到 Armature 的 Edit Mode 再运行。")
+    return obj
+
+def bone_depth(edit_bone):
+    d = 0
+    p = edit_bone.parent
+    while p is not None:
+        d += 1
+        p = p.parent
+    return d
+
+def mirror_vec(v: Vector, axis="X") -> Vector:
+    v2 = v.copy()
+    ax = axis.upper()
+    if ax == "X":
+        v2.x = -v2.x
+    elif ax == "Y":
+        v2.y = -v2.y
+    elif ax == "Z":
+        v2.z = -v2.z
+    else:
+        raise ValueError(f"Unknown axis: {axis}")
+    return v2
+
+def strict_score(src_head_m, src_tail_m, cand_head, cand_tail) -> float:
+    # 严格：只允许 head->head、tail->tail
+    return (cand_head - src_head_m).length + (cand_tail - src_tail_m).length
+
+def child_count(edit_bone) -> int:
+    return len(edit_bone.children)
+
+def sibling_index_in_parent(edit_bone) -> int:
+    """
+    在 parent.children 中的序号（从 0 开始）。
+    没有 parent（root）则返回 0。
+    注意：children 的迭代顺序通常是稳定的（创建/内部顺序），但如果你的 rig 依赖特定顺序，
+    你也可以改成按 name 排序等更确定的方式。
+    """
+    p = edit_bone.parent
+    if p is None:
+        return 0
+    kids = list(p.children)
+    try:
+        return kids.index(edit_bone)
+    except ValueError:
+        return 0
+
+def find_best_mirrored_bone(ebones, src_bone, tol=TOLERANCE, axis=MIRROR_AXIS):
+    src_depth = bone_depth(src_bone)
+    head_m = mirror_vec(src_bone.head, axis)
+    tail_m = mirror_vec(src_bone.tail, axis)
+
+    src_children = child_count(src_bone)
+    src_idx = sibling_index_in_parent(src_bone)
+    src_len = (src_bone.tail - src_bone.head).length  # 可选 tie-break
+
+    candidates = []
+    for b in ebones:
+        if b == src_bone:
+            continue
+        if bone_depth(b) != src_depth:
+            continue
+
+        sc = strict_score(head_m, tail_m, b.head, b.tail)
+
+        # 阈值判断：score = head差 + tail差，因此阈值用 2*tol
+        if sc <= (2.0 * tol):
+            b_children = child_count(b)
+            b_idx = sibling_index_in_parent(b)
+            b_len = (b.tail - b.head).length
+
+            # 排序键：越小越好
+            key = (
+                sc,
+                abs(b_children - src_children),  # 1) 孩子数量差
+                abs(b_idx - src_idx),            # 2) 在 parent 下的序号差（新增）
+                abs(b_len - src_len),            # 3) 长度差（可选）
+                b.name                           # 4) 兜底保证确定性
+            )
+            candidates.append((key, b, sc))
+
+    if not candidates:
+        return None, None, None
+
+    candidates.sort(key=lambda x: x[0])
+    best_key, best_bone, best_score = candidates[0]
+    return best_bone, best_score, best_key
+
+def swap_side_name(name: str):
+    for a, b in LEFT_TO_RIGHT:
+        if a in name:
+            return name.replace(a, b), True
+
+    if ALLOW_REVERSE_SWAP:
+        for a, b in RIGHT_TO_LEFT:
+            if a in name:
+                return name.replace(a, b), True
+
+    return name, False
+
+def make_unique_name(arm_data, desired_name, exclude_bone=None):
+    existing = {b.name for b in arm_data.edit_bones}
+    if exclude_bone is not None and exclude_bone.name == desired_name:
+        return desired_name
+    if desired_name not in existing:
+        return desired_name
+
+    idx = 1
+    while True:
+        candidate = f"{desired_name}.{idx:03d}"
+        if candidate not in existing:
+            return candidate
+        idx += 1
+
+
+# =========================
+# Main
+# =========================
+def rename_best_mirror_for_each_selected():
+    arm_obj = ensure_armature_edit_mode()
+    arm = arm_obj.data
+    ebones = arm.edit_bones
+
+    selected = [b for b in ebones if b.select]
+    if not selected:
+        raise RuntimeError("没有选中任何骨骼。请在 Edit Mode 选中要作为参考侧的骨骼。")
+
+    renamed = 0
+    skipped = 0
+    not_found = 0
+
+    for src in selected:
+        target, score, key = find_best_mirrored_bone(ebones, src)
+        if target is None:
+            print(f"[NOT FOUND] src={src.name} -> 没找到严格镜像匹配（检查对称轴/容差/层级深度）")
+            not_found += 1
+            continue
+
+        new_name, ok = swap_side_name(src.name)
+        if not ok:
+            print(f"[SKIP] src={src.name} -> 名字里没找到 side 标记（_l/.l/left/Left）")
+            skipped += 1
+            continue
+
+        unique = make_unique_name(arm, new_name, exclude_bone=target)
+        old = target.name
+        target.name = unique
+        renamed += 1
+
+        # key = (score, child_diff, sibling_index_diff, len_diff, name)
+        print(
+            f"[RENAME] src={src.name}  best_match={old} -> {target.name} "
+            f"(score={score:.6g}, child_diff={key[1]}, sibling_diff={key[2]}, len_diff={key[3]:.6g})"
+        )
+
+    print(f"\nDone. renamed={renamed}, skipped={skipped}, not_found={not_found}")
+
+# Run
+rename_best_mirror_for_each_selected()
